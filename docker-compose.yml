@@ -1,0 +1,69 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  # Base de données PostgreSQL
+  postgres:
+    image: postgres:15-alpine
+    container_name: travel_postgres
+    environment:
+      POSTGRES_USER: travel_user
+      POSTGRES_PASSWORD: travel_pass
+      POSTGRES_DB: travel_assistant
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    healthcheck:
+      test: ["CMD-BASH", "pg_isready -U travel_user -d travel_assistant"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - travel-network
+
+  # Backend FastAPI
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: travel_backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://travel_user:travel_pass@postgres:5432/travel_assistant
+      REDIS_URL: redis://redis:6379
+    env_file:
+      - ./backend/.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    networks:
+      - travel-network
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  redis:
+    image: redis:7-alpine
+    container_name: travel_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - travel-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  travel-network:
+    driver: bridge
