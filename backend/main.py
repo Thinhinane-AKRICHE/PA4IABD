@@ -1,75 +1,62 @@
-# backend/app/main.py
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-import os
+from fastapi import FastAPI, HTTPException
 from dotenv import load_dotenv
+
+from backend.schemas import ChatRequest, ChatResponse
+from backend.agent_builder import build_agent
+from user_profile import load_user_profile
 
 load_dotenv()
 
-app = FastAPI(
-    title="Travel Assistant API",
-    description="AI-powered travel planning assistant",
-    version="1.0.0"
-)
+app = FastAPI(title="Travel Buddy API")
 
-# CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 @app.get("/")
 def root():
-    return {
-        "message": "Travel Assistant API v1.0",
-        "status": "running"
-    }
+    return {"message": "Travel Buddy Backend is running"}
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
 
-@app.get("/test-db")
-def test_db():
-    """Test connexion à PostgreSQL"""
-    from sqlalchemy import create_engine, text
-    
+@app.post("/chat", response_model=ChatResponse)
+def chat(request: ChatRequest):
     try:
-        DATABASE_URL = os.getenv("DATABASE_URL")
-        engine = create_engine(DATABASE_URL)
-        
-        with engine.connect() as connection:
-            result = connection.execute(text("SELECT COUNT(*) FROM users"))
-            count = result.scalar()
-        
-        return {
-            "database": "connected",
-            "users_count": count
-        }
-    except Exception as e:
-        return {
-            "database": "error",
-            "error": str(e)
+        agent = build_agent(
+            provider=request.provider,
+            model=request.model,
+            temperature=request.temperature,
+        )
+
+        question = request.message
+
+        if request.user_id:
+            profil = load_user_profile(request.user_id)
+            if profil:
+                question = (
+                    f"[PROFIL UTILISATEUR — adapte ta réponse :\n"
+                    f"Nom : {profil['nom']} | Langue : {profil['langue']} | "
+                    f"Budget : {profil['budget']} | Type : {profil['type_voyage']} | "
+                    f"Hôtels : {profil['prefs_hotels']} | "
+                    f"Alimentaire : {profil['contraintes_alim']} | "
+                    f"Destinations favorites : {profil['destinations_fav']}]\n\n"
+                    f"Question : {question}"
+                )
+
+        config = {
+            "configurable": {
+                "thread_id": request.thread_id
+            }
         }
 
-@app.get("/test-redis")
-def test_redis():
-    """Test connexion à Redis"""
-    import redis
-    
-    try:
-        REDIS_URL = os.getenv("REDIS_URL")
-        r = redis.from_url(REDIS_URL)
-        r.ping()
-        
-        return {
-            "redis": "connected"
-        }
+        result = agent.invoke(
+            {"messages": [("user", question)]},
+            config=config,
+        )
+
+        final_message = result["messages"][-1].content
+
+        return ChatResponse(
+            response=final_message,
+            provider=request.provider,
+            model=request.model,
+        )
+
     except Exception as e:
-        return {
-            "redis": "error",
-            "error": str(e)
-        }
+        raise HTTPException(status_code=500, detail=str(e))
