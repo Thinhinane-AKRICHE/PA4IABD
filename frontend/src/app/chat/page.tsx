@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { TravelBuddyAPI } from '../lib/api';
 
@@ -11,21 +11,37 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // Vérifier si l'utilisateur est déjà connecté
+  useEffect(() => {
+    if (TravelBuddyAPI.isAuthenticated()) {
+      router.push('/chat');
+    }
+  }, [router]);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError('');
 
     try {
+      // Validation côté client
+      if (!email || !password) {
+        throw new Error('Veuillez remplir tous les champs');
+      }
+
       // Appel API
       const result = await TravelBuddyAPI.login(email, password);
       
-      console.log('✅ Connexion réussie:', result);  // Debug
+      console.log('✅ Connexion réussie:', result);
       
+      // Attendre un court instant pour s'assurer que le token est bien stocké
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Redirection vers la page de chat
       router.push('/chat');
       
     } catch (err: any) {
-      console.error('❌ Erreur de connexion:', err);  // Debug
+      console.error('❌ Erreur de connexion:', err);
       setError(err.message || 'Erreur de connexion. Veuillez réessayer.');
     } finally {
       setIsLoading(false);
@@ -69,7 +85,8 @@ export default function LoginPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="vous@exemple.com"
                 required
-                className="w-full px-4 py-3 bg-[#F5F5F0] border border-[#E5E5DC] rounded-xl focus:outline-none focus:border-[#C4B5A0] focus:bg-white transition-all text-[#2D2D2D] placeholder-[#999]"
+                disabled={isLoading}
+                className="w-full px-4 py-3 bg-[#F5F5F0] border border-[#E5E5DC] rounded-xl focus:outline-none focus:border-[#C4B5A0] focus:bg-white transition-all text-[#2D2D2D] placeholder-[#999] disabled:opacity-50 disabled:cursor-not-allowed"
               />
             </div>
 
@@ -85,7 +102,8 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 required
-                className="w-full px-4 py-3 bg-[#F5F5F0] border border-[#E5E5DC] rounded-xl focus:outline-none focus:border-[#C4B5A0] focus:bg-white transition-all text-[#2D2D2D] placeholder-[#999]"
+                disabled={isLoading}
+                className="w-full px-4 py-3 bg-[#F5F5F0] border border-[#E5E5DC] rounded-xl focus:outline-none focus:border-[#C4B5A0] focus:bg-white transition-all text-[#2D2D2D] placeholder-[#999] disabled:opacity-50 disabled:cursor-not-allowed"
               />
             </div>
 
@@ -104,11 +122,16 @@ export default function LoginPage() {
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
-                  className="w-4 h-4 rounded border-[#E5E5DC] text-[#2D2D2D] focus:ring-[#C4B5A0]"
+                  disabled={isLoading}
+                  className="w-4 h-4 rounded border-[#E5E5DC] text-[#2D2D2D] focus:ring-[#C4B5A0] disabled:opacity-50"
                 />
                 <span className="text-[#666]">Se souvenir de moi</span>
               </label>
-              <button type="button" className="text-[#2D2D2D] hover:underline">
+              <button 
+                type="button" 
+                disabled={isLoading}
+                className="text-[#2D2D2D] hover:underline disabled:opacity-50"
+              >
                 Mot de passe oublié ?
               </button>
             </div>

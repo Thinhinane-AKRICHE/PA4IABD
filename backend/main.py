@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.routes import chat
-from api.routes import auth 
+from api.routes import auth
 
 app = FastAPI(title="TravelBuddy API")
 
@@ -15,9 +15,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Routes
-app.include_router(auth.router) 
-app.include_router(chat.router)
+# Routes AVEC le préfixe /api
+app.include_router(auth.router, prefix="/api")  
+app.include_router(chat.router, prefix="/api")  
 
 @app.get("/")
 def read_root():
@@ -26,3 +26,8 @@ def read_root():
 @app.get("/health")
 def health_check():
     return {"status": "healthy"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

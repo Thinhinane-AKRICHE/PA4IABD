@@ -85,30 +85,6 @@ def get_weather_info(city: str) -> str:
 
 
 @tool
-def get_profile_info(user_id: int = 1) -> str:
-    """
-    Récupère le profil et préférences enregistrées d'un utilisateur
-    (budget, type de voyage, préférences hôtels, contraintes
-    alimentaires, destinations favorites, langue).
-    
-    Utilise ce tool si l'utilisateur demande "mon profil",
-    "mes préférences", ou pour adapter une réponse à son profil.
-    
-    Args:
-        user_id: identifiant de l'utilisateur (ex: 1)
-    
-    Returns:
-        str: Profil utilisateur formaté
-    """
-    profile = get_user_profile(user_id)
-    
-    if "error" in profile:
-        return f"Erreur : {profile['error']}"
-    
-    return format_profile_for_agent(profile)
-
-
-@tool
 def get_country_info(country_name: str) -> str:
     """
     Récupère les informations officielles sur un pays (capitale, langue, 
@@ -198,12 +174,16 @@ def create_travel_plan(
     return generate_itinerary(destination, days, interests, budget)
 
 
-SYSTEM_PROMPT = """Tu es Travel Buddy, un assistant voyage francophone amical et expert.
+# Template du system prompt (sera complété avec le profil utilisateur)
+SYSTEM_PROMPT_TEMPLATE = """Tu es Travel Buddy, un assistant voyage francophone amical et expert.
 
 Tu DOIS utiliser tes outils pour répondre — ne te base JAMAIS sur ta connaissance générale.
 
+PROFIL UTILISATEUR (PRIORITÉ ABSOLUE) :
+{user_profile}
+
 WORKFLOW OBLIGATOIRE :
-1. Au début de CHAQUE nouvelle conversation, appelle get_profile_info(user_id=1)
+1. Le profil utilisateur ci-dessus est DÉJÀ chargé automatiquement
 2. Adapte TOUTES tes suggestions selon ce profil :
    - HOTELS : Filtre par budget, étoiles, équipements ESSENTIELS (BLOQUANTS)
    - RESTAURANTS : Respecte le régime alimentaire et les allergies
@@ -216,11 +196,10 @@ OUTILS DISPONIBLES :
 - get_weather_info : pour TOUTE question sur la météo
 - get_hotels_info : pour TOUTE question sur les hôtels ou l'hébergement
 - create_travel_plan : pour générer un PROGRAMME / ITINÉRAIRE de voyage structuré
-- get_profile_info(user_id=1) : pour charger le profil utilisateur
 - get_country_info : pour des infos sur un PAYS (capitale, langue, monnaie, etc.)
 
 RÈGLES STRICTES :
-1. Appelle TOUJOURS get_profile_info(user_id=1) au début de chaque conversation
+1. Le profil utilisateur ci-dessus est DÉJÀ disponible - utilise-le SYSTÉMATIQUEMENT
 2. Si l'utilisateur demande des infos sur une VILLE, tu DOIS appeler 
    search_destination_info, MÊME si tu penses connaître la réponse
 3. Si l'utilisateur demande des infos sur un PAYS (capitale, langue, monnaie, 
@@ -253,12 +232,13 @@ les fournit). Si l'utilisateur donne un budget :
 AUTRES RÈGLES :
 - Réponds toujours en français, chaleureux et structuré
 - Si tu ne trouves pas l'info dans les tools, dis-le honnêtement
+- Utilise TOUJOURS le profil utilisateur pour personnaliser tes réponses
 """
 
 
 class TravelBuddyAgent:
     """
-    Agent de voyage IA avec mémoire persistante.
+    Agent de voyage IA avec mémoire persistante et profil utilisateur automatique.
     """
     
     def __init__(self):
@@ -280,28 +260,41 @@ class TravelBuddyAgent:
         self.memory = PostgresSaver(self.pool)
         self.memory.setup()
         
-        print("Connexion à Neon Postgres établie")
+        print("✅ Connexion à Neon Postgres établie")
         
         self.llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
         
         self.tools = [
             search_destination_info, 
             get_weather_info, 
-            get_profile_info,
             get_country_info,
             get_hotels_info,
             create_travel_plan
         ]
         
-        self.system_message = SystemMessage(content=SYSTEM_PROMPT)
+        print("✅ Agent Travel Buddy prêt\n")
+    
+    
+    def _load_user_profile(self, user_id: int) -> str:
+        """
+        Charge le profil de l'utilisateur et le formate pour l'agent.
         
-        self.agent_executor = create_react_agent(
-            self.llm,
-            self.tools,
-            checkpointer=self.memory,
-        )
+        Args:
+            user_id: ID de l'utilisateur
+            
+        Returns:
+            str: Profil formaté pour l'agent
+        """
+        try:
+            profile = get_user_profile(user_id)
+            
+            if "error" in profile:
+                return f"⚠️ Profil non disponible (erreur: {profile['error']})"
+            
+            return format_profile_for_agent(profile)
         
-        print("Agent Travel Buddy pret\n")
+        except Exception as e:
+            return f"⚠️ Erreur lors du chargement du profil : {str(e)}"
     
     
     def chat(
@@ -312,25 +305,42 @@ class TravelBuddyAgent:
     ) -> Dict[str, Any]:
         """
         Envoie un message à l'agent et récupère la réponse.
+        Le profil utilisateur est AUTOMATIQUEMENT chargé et injecté.
         
         Args:
             message: Le message de l'utilisateur
-            user_id: ID de l'utilisateur
+            user_id: ID de l'utilisateur connecté
             thread_id: ID de la conversation (généré si non fourni)
         
         Returns:
             Dict contenant la réponse, le thread_id et les outils utilisés
         """
         
+        # 1. Charger le profil utilisateur AUTOMATIQUEMENT
+        user_profile = self._load_user_profile(user_id)
+        
+        # 2. Créer le system prompt avec le profil injecté
+        system_prompt = SYSTEM_PROMPT_TEMPLATE.format(user_profile=user_profile)
+        system_message = SystemMessage(content=system_prompt)
+        
+        # 3. Créer l'agent avec le profil injecté
+        agent_executor = create_react_agent(
+            self.llm,
+            self.tools,
+            checkpointer=self.memory,
+        )
+        
+        # 4. Générer le thread_id si nécessaire
         if thread_id is None:
             import uuid
             thread_id = f"user-{user_id}-{uuid.uuid4().hex[:8]}"
         
         config = {"configurable": {"thread_id": thread_id}}
         
+        # 5. Préparer les inputs avec le system message personnalisé
         inputs = {
             "messages": [
-                self.system_message,
+                system_message,
                 ("user", message)
             ]
         }
@@ -339,7 +349,8 @@ class TravelBuddyAgent:
         tools_used = []
         
         try:
-            for chunk in self.agent_executor.stream(inputs, config, stream_mode="values"):
+            # 6. Exécuter l'agent
+            for chunk in agent_executor.stream(inputs, config, stream_mode="values"):
                 message_obj = chunk["messages"][-1]
                 
                 if hasattr(message_obj, 'content') and message_obj.content:
@@ -352,7 +363,8 @@ class TravelBuddyAgent:
             return {
                 "response": response_text or "Désolé, je n'ai pas pu générer de réponse.",
                 "thread_id": thread_id,
-                "tools_used": list(set(tools_used))
+                "tools_used": list(set(tools_used)),
+                "user_id": user_id  # Pour debug
             }
         
         except Exception as e:
@@ -366,19 +378,19 @@ class TravelBuddyAgent:
         Args:
             thread_id: ID de la conversation à supprimer
         """
-        print(f"Suppression de conversation non implémentée pour {thread_id}")
+        print(f"⚠️ Suppression de conversation non implémentée pour {thread_id}")
         pass
     
     
     def close(self):
         """Ferme proprement le pool de connexions."""
-        print("\nFermeture du pool de connexions Neon")
+        print("\n🔌 Fermeture du pool de connexions Neon")
         self.pool.close()
 
 
 import atexit
 
 def cleanup():
-    print("\nFermeture du pool de connexions Neon...")
+    print("\n🔌 Fermeture du pool de connexions Neon...")
 
 atexit.register(cleanup)

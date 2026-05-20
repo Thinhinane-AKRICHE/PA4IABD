@@ -41,7 +41,7 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(255), nullable=False)  # Pour l'authentification
     email = Column(String(255), unique=True, index=True, nullable=False)
-    hashed_password = Column(String(255), nullable=False)  # Nouveau champ pour auth
+    hashed_password = Column(String(255), nullable=False) 
     
     # Champs du profil utilisateur existant
     nom = Column(String(255))
