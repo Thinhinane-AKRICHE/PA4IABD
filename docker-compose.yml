@@ -1,69 +1,83 @@
-# docker-compose.yml
-version: '3.8'
-
 services:
-  # Base de données PostgreSQL
   postgres:
     image: postgres:15-alpine
-    container_name: travel_postgres
+    container_name: travelbuddy-postgres
     environment:
-      POSTGRES_USER: travel_user
-      POSTGRES_PASSWORD: travel_pass
-      POSTGRES_DB: travel_assistant
+      POSTGRES_USER: travelbuddy
+      POSTGRES_PASSWORD: travelbuddy_password
+      POSTGRES_DB: travelbuddy
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./schema.sql:/docker-entrypoint-initdb.d/schema.sql
+      - ./backend/db/init_database.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD-BASH", "pg_isready -U travel_user -d travel_assistant"]
+      test: ["CMD-SHELL", "pg_isready -U travelbuddy"]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
-      - travel-network
+      - travelbuddy-network
 
-  # Backend FastAPI
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: travelbuddy-pgadmin
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@travelbuddy.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'False'
+      PGPASSFILE: /var/lib/pgadmin/pgpass
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
+      - ./pgadmin/pgpass:/pgadmin4/pgpass:ro
+    networks:
+      - travelbuddy-network
+
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: travel_backend
-    ports:
-      - "8000:8000"
-    environment:
-      DATABASE_URL: postgresql://travel_user:travel_pass@postgres:5432/travel_assistant
-      REDIS_URL: redis://redis:6379
-    env_file:
-      - ./backend/.env
+    container_name: travelbuddy-backend
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
+    env_file:
+      - ./backend/.env
     volumes:
       - ./backend:/app
-    networks:
-      - travel-network
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-
-  redis:
-    image: redis:7-alpine
-    container_name: travel_redis
+      - /app/__pycache__
     ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
+      - "8000:8000"
     networks:
-      - travel-network
+      - travelbuddy-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: travelbuddy-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    networks:
+      - travelbuddy-network
 
 volumes:
   postgres_data:
-  redis_data:
+  pgadmin_data:
 
 networks:
-  travel-network:
+  travelbuddy-network:
     driver: bridge
