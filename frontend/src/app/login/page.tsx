@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { TravelBuddyAPI } from '../lib/api';
 
@@ -10,27 +10,92 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  
+  // ✅ Utiliser useRef pour éviter les re-renders
+  const hasCheckedAuth = useRef(false);
+  const isRedirecting = useRef(false);
+
+  // ✅ Vérifier l'auth UNE SEULE FOIS au montage
+  useEffect(() => {
+    // Si déjà vérifié, ne rien faire
+    if (hasCheckedAuth.current) return;
+    
+    // Marquer comme vérifié IMMÉDIATEMENT
+    hasCheckedAuth.current = true;
+    
+    const isAuth = TravelBuddyAPI.isAuthenticated();
+    console.log('🔍 Vérification auth:', isAuth);
+    
+    if (isAuth && !isRedirecting.current) {
+      console.log('✅ Déjà connecté, redirection...');
+      isRedirecting.current = true;
+      
+      // Redirection avec replace pour éviter l'historique
+      window.location.replace('/chat');
+    }
+  }, []); // ⚠️ Tableau vide = une seule exécution
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Bloquer si déjà en cours de redirection
+    if (isRedirecting.current) return;
+    
     setIsLoading(true);
     setError('');
 
     try {
+      // Validation côté client
+      if (!email || !password) {
+        throw new Error('Veuillez remplir tous les champs');
+      }
+
+      console.log('📤 Tentative de connexion avec:', email);
+
       // Appel API
       const result = await TravelBuddyAPI.login(email, password);
       
-      console.log('✅ Connexion réussie:', result);  // Debug
+      console.log('✅ Connexion réussie:', result);
+      console.log('🔑 Token stocké:', TravelBuddyAPI.getToken());
       
-      router.push('/chat');
+      // Vérifier que le token est bien stocké
+      if (!TravelBuddyAPI.getToken()) {
+        throw new Error('Le token n\'a pas été stocké correctement');
+      }
+
+      // Marquer comme en redirection
+      isRedirecting.current = true;
+      
+      console.log('🔄 Redirection vers /chat...');
+      
+      // ✅ Utiliser replace pour éviter l'historique
+      window.location.replace('/chat');
       
     } catch (err: any) {
-      console.error('❌ Erreur de connexion:', err);  // Debug
+      console.error('❌ Erreur de connexion:', err);
       setError(err.message || 'Erreur de connexion. Veuillez réessayer.');
-    } finally {
       setIsLoading(false);
+      isRedirecting.current = false;
     }
   };
+
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && !isLoading) {
+      handleLogin(e as any);
+    }
+  };
+
+  // Bloquer le rendu si en redirection
+  if (isRedirecting.current) {
+    return (
+      <div className="min-h-screen bg-[#F5F5F0] flex items-center justify-center">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-[#2D2D2D]"></div>
+          <p className="mt-4 text-[#666]">Redirection...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#F5F5F0] flex items-center justify-center p-4">
@@ -67,9 +132,11 @@ export default function LoginPage() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                onKeyPress={handleKeyPress}
                 placeholder="vous@exemple.com"
                 required
-                className="w-full px-4 py-3 bg-[#F5F5F0] border border-[#E5E5DC] rounded-xl focus:outline-none focus:border-[#C4B5A0] focus:bg-white transition-all text-[#2D2D2D] placeholder-[#999]"
+                disabled={isLoading}
+                className="w-full px-4 py-3 bg-[#F5F5F0] border border-[#E5E5DC] rounded-xl focus:outline-none focus:border-[#C4B5A0] focus:bg-white transition-all text-[#2D2D2D] placeholder-[#999] disabled:opacity-50 disabled:cursor-not-allowed"
               />
             </div>
 
@@ -83,9 +150,11 @@ export default function LoginPage() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                onKeyPress={handleKeyPress}
                 placeholder="••••••••"
                 required
-                className="w-full px-4 py-3 bg-[#F5F5F0] border border-[#E5E5DC] rounded-xl focus:outline-none focus:border-[#C4B5A0] focus:bg-white transition-all text-[#2D2D2D] placeholder-[#999]"
+                disabled={isLoading}
+                className="w-full px-4 py-3 bg-[#F5F5F0] border border-[#E5E5DC] rounded-xl focus:outline-none focus:border-[#C4B5A0] focus:bg-white transition-all text-[#2D2D2D] placeholder-[#999] disabled:opacity-50 disabled:cursor-not-allowed"
               />
             </div>
 
@@ -104,11 +173,16 @@ export default function LoginPage() {
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
-                  className="w-4 h-4 rounded border-[#E5E5DC] text-[#2D2D2D] focus:ring-[#C4B5A0]"
+                  disabled={isLoading}
+                  className="w-4 h-4 rounded border-[#E5E5DC] text-[#2D2D2D] focus:ring-[#C4B5A0] disabled:opacity-50"
                 />
                 <span className="text-[#666]">Se souvenir de moi</span>
               </label>
-              <button type="button" className="text-[#2D2D2D] hover:underline">
+              <button 
+                type="button" 
+                disabled={isLoading}
+                className="text-[#2D2D2D] hover:underline disabled:opacity-50"
+              >
                 Mot de passe oublié ?
               </button>
             </div>

@@ -23,9 +23,10 @@ app.include_router(chat.router, prefix="/api")
 def read_root():
     return {"message": "TravelBuddy API"}
 
-@app.get("/health")
+# ✅ CORRECTION : Ajouter /api au début
+@app.get("/api/health")
 def health_check():
-    return {"status": "healthy"}
+    return {"status": "online", "message": "API opérationnelle"}
 
 
 if __name__ == "__main__":

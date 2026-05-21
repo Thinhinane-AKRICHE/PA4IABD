@@ -1,228 +1,301 @@
 """
-Tool get_user_profile — Récupère le profil utilisateur pour personnaliser les suggestions.
-
-Ce tool permet à l'agent d'accéder aux préférences permanentes de l'utilisateur :
-- Budget habituel
-- Régime alimentaire (végétarien, allergies, etc.)
-- Préférences hôtels (étoiles, équipements ESSENTIELS)
-- Centres d'intérêt
-- Destinations favorites et blacklist
-
-L'agent DOIT utiliser ce profil pour filtrer et adapter toutes ses suggestions.
+Module pour récupérer et formater le profil utilisateur depuis la base de données.
 """
 
 import os
-import sys
-from pathlib import Path
-
-# Ajouter le dossier parent au path pour importer database
-sys.path.append(str(Path(__file__).parent.parent))
-
+import json
+import psycopg2
+from typing import Dict, Any
 from dotenv import load_dotenv
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from core.database import UserTravelProfile, FavoriteDestination, BlacklistDestination
 
 load_dotenv()
 
-# Configuration DB
-DATABASE_URL = os.environ.get("DATABASE_URL")
-engine = create_engine(DATABASE_URL, echo=False)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-
-# ============================================================
-# TOOL PRINCIPAL
-# ============================================================
-
-def get_user_profile(user_id: int = None) -> dict:
+def get_db_connection():
     """
-    Récupère le profil complet de l'utilisateur.
-    
-    Args:
-        user_id: ID de l'utilisateur (par défaut 1)
+    Crée une connexion à la base de données PostgreSQL.
     
     Returns:
-        Dict structuré avec toutes les préférences, ou erreur si user introuvable
+        psycopg2.connection: Connexion à la base de données
     """
+    database_url = os.getenv("DATABASE_URL")
     
-    if user_id is None:
-        user_id = 1
-    
-    db = SessionLocal()
+    if not database_url:
+        raise ValueError("DATABASE_URL non définie dans les variables d'environnement")
     
     try:
-        # Récupérer le profil de voyage
-        profile = db.query(UserTravelProfile).filter(
-            UserTravelProfile.user_id == user_id
-        ).first()
-        
-        if not profile:
-            return {
-                "error": f"Aucun profil trouvé pour l'utilisateur {user_id}",
-                "suggestion": "L'utilisateur doit créer son profil de voyage"
-            }
-        
-        # Récupérer les destinations favorites
-        favorites = db.query(FavoriteDestination).filter(
-            FavoriteDestination.user_id == user_id
-        ).all()
-        
-        # Récupérer la blacklist
-        blacklist = db.query(BlacklistDestination).filter(
-            BlacklistDestination.user_id == user_id
-        ).all()
-        
-        return {
-            "user_id": user_id,
-            "budget": {
-                "min": profile.budget_min_habituel,
-                "max": profile.budget_max_habituel,
-                "devise": profile.devise_preferee
-            },
-            "voyage": {
-                "types_preferes": profile.types_voyage_preferes or [],
-                "rythme": profile.rythme_prefere,
-                "duree_typique_jours": profile.duree_voyage_typique,
-                "periodes_preferees": profile.periodes_preferees or [],
-                "voyage_avec": profile.voyage_generalement_avec or []
-            },
-            "alimentation": {
-                "regime": profile.regime_alimentaire or [],
-                "allergies": profile.allergies_alimentaires or [],
-                "cuisines_preferees": profile.cuisines_preferees or []
-            },
-            "hotels": {
-                "categories_preferees": profile.categories_hotel_preferees or [],
-                "etoiles_min": profile.etoiles_min_preferees,
-                "etoiles_max": profile.etoiles_max_preferees,
-                "localisation": {
-                    "centre_ville": profile.prefere_centre_ville,
-                    "calme": profile.prefere_calme,
-                    "proche_transport": profile.prefere_proche_transport
-                },
-                "types_acceptes": profile.types_logement_acceptes or [],
-                "equipements_essentiels": profile.equipements_essentiels or [],
-                "equipements_souhaites": profile.equipements_souhaites or [],
-                "annulation_gratuite": profile.exige_annulation_gratuite,
-                "paiement_sur_place": profile.accepte_paiement_sur_place
-            },
-            "transport": {
-                "modes_preferes": profile.modes_transport_preferes or [],
-                "classe_vol": profile.classe_vol_preferee,
-                "accepte_escales": profile.accepte_escales
-            },
-            "contexte": {
-                "nombre_enfants": profile.nombre_enfants,
-                "ages_enfants": profile.ages_enfants or [],
-                "contraintes_mobilite": profile.contraintes_mobilite or []
-            },
-            "preferences_destination": {
-                "climats_preferes": profile.climats_preferes or [],
-                "types_destinations": profile.types_destinations_preferees or []
-            },
-            "interets": profile.centres_interet or [],
-            "sante": {
-                "problemes": profile.problemes_sante or []
-            },
-            "destinations": {
-                "favorites": [
-                    {
-                        "pays": fav.pays,
-                        "ville": fav.ville,
-                        "raison": fav.raison,
-                        "note": fav.note,
-                        "deja_visite": fav.deja_visite,
-                        "voudrait_revisiter": fav.aimerait_revisiter
-                    }
-                    for fav in favorites
-                ],
-                "blacklist": [
-                    {
-                        "pays": bl.pays,
-                        "ville": bl.ville,
-                        "raison": bl.raison
-                    }
-                    for bl in blacklist
-                ]
-            }
-        }
-    
+        conn = psycopg2.connect(
+            database_url,
+            connect_timeout=10,
+            sslmode='require',
+            keepalives=1,
+            keepalives_idle=30,
+            keepalives_interval=10,
+            keepalives_count=5
+        )
+        return conn
     except Exception as e:
-        return {
-            "error": f"Erreur lors de la récupération du profil : {str(e)}"
+        print(f"Erreur connexion DB: {e}")
+        raise
+
+
+def get_user_profile(user_id: int) -> Dict[str, Any]:
+    """
+    Récupère le profil complet d'un utilisateur depuis la base de données.
+    
+    Args:
+        user_id: ID de l'utilisateur
+        
+    Returns:
+        Dict contenant toutes les informations du profil utilisateur
+    """
+    
+    conn = None
+    cur = None
+    
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        cur.execute("""
+            SELECT 
+                id, nom, prenom, email, nationalite, langue_preferee
+            FROM users
+            WHERE id = %s
+        """, (user_id,))
+        
+        user = cur.fetchone()
+        
+        if not user:
+            return {"error": f"Utilisateur {user_id} non trouvé"}
+        
+        cur.execute("""
+            SELECT 
+                budget_min_habituel,
+                budget_max_habituel,
+                devise_preferee,
+                types_voyage_preferes,
+                rythme_prefere,
+                duree_voyage_typique,
+                periodes_preferees,
+                regime_alimentaire,
+                allergies_alimentaires,
+                cuisines_preferees,
+                categories_hotel_preferees,
+                etoiles_min_preferees,
+                etoiles_max_preferees,
+                prefere_centre_ville,
+                prefere_calme,
+                prefere_proche_transport,
+                types_logement_acceptes,
+                equipements_essentiels,
+                equipements_souhaites,
+                exige_annulation_gratuite,
+                accepte_paiement_sur_place,
+                modes_transport_preferes,
+                classe_vol_preferee,
+                accepte_escales,
+                voyage_generalement_avec,
+                nombre_enfants,
+                ages_enfants,
+                contraintes_mobilite,
+                climats_preferes,
+                types_destinations_preferees,
+                centres_interet,
+                problemes_sante
+            FROM user_travel_profile
+            WHERE user_id = %s
+        """, (user_id,))
+        
+        profile = cur.fetchone()
+        
+        cur.execute("""
+            SELECT pays, ville, raison, note, deja_visite, aimerait_revisiter
+            FROM user_favorite_destinations
+            WHERE user_id = %s
+            ORDER BY note DESC
+        """, (user_id,))
+        
+        favorites_rows = cur.fetchall()
+        
+        cur.execute("""
+            SELECT pays, ville, raison
+            FROM user_blacklist_destinations
+            WHERE user_id = %s
+        """, (user_id,))
+        
+        blacklist_rows = cur.fetchall()
+        
+        result = {
+            "user_id": user[0],
+            "nom": user[1],
+            "prenom": user[2],
+            "email": user[3],
+            "nationalite": user[4],
+            "langue_preferee": user[5],
         }
+        
+        if profile:
+            result.update({
+                "budget_min": profile[0],
+                "budget_max": profile[1],
+                "devise_preferee": profile[2],
+                "types_voyage_preferes": profile[3] or [],
+                "rythme_prefere": profile[4],
+                "duree_voyage_typique": profile[5],
+                "periodes_preferees": profile[6] or [],
+                "regime_alimentaire": profile[7],
+                "allergies_alimentaires": profile[8] or [],
+                "cuisines_preferees": profile[9] or [],
+                "categories_hotel_preferees": profile[10] or [],
+                "etoiles_min_preferees": profile[11],
+                "etoiles_max_preferees": profile[12],
+                "prefere_centre_ville": profile[13],
+                "prefere_calme": profile[14],
+                "prefere_proche_transport": profile[15],
+                "types_logement_acceptes": profile[16] or [],
+                "equipements_essentiels": profile[17] or [],
+                "equipements_souhaites": profile[18] or [],
+                "exige_annulation_gratuite": profile[19],
+                "accepte_paiement_sur_place": profile[20],
+                "modes_transport_preferes": profile[21] or [],
+                "classe_vol_preferee": profile[22],
+                "accepte_escales": profile[23],
+                "voyage_generalement_avec": profile[24] or [],
+                "nombre_enfants": profile[25],
+                "ages_enfants": profile[26] or [],
+                "contraintes_mobilite": profile[27] or [],
+                "climats_preferes": profile[28] or [],
+                "types_destinations_preferees": profile[29] or [],
+                "centres_interet": profile[30] or [],
+                "problemes_sante": profile[31] or [],
+            })
+        
+        result["destinations_favorites"] = [
+            {
+                "pays": row[0],
+                "ville": row[1],
+                "raison": row[2],
+                "note": row[3],
+                "deja_visite": row[4],
+                "aimerait_revisiter": row[5]
+            }
+            for row in favorites_rows
+        ]
+        
+        result["destinations_blacklist"] = [
+            {
+                "pays": row[0],
+                "ville": row[1],
+                "raison": row[2]
+            }
+            for row in blacklist_rows
+        ]
+        
+        return result
+        
+    except Exception as e:
+        print(f"Erreur get_user_profile: {e}")
+        return {"error": f"Erreur lors de la récupération du profil : {str(e)}"}
     
     finally:
-        db.close()
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
 
 
-def format_profile_for_agent(profile: dict) -> str:
+def format_profile_for_agent(profile: Dict[str, Any]) -> str:
+    """
+    Formate le profil utilisateur au format JSON structuré pour le LLM.
+    
+    Args:
+        profile: Dictionnaire contenant le profil utilisateur complet
+        
+    Returns:
+        str: Profil au format JSON structuré et lisible pour le LLM
+    """
+    
     if "error" in profile:
-        return f"Erreur: {profile['error']}"
+        return ""
     
-    text = f"""
-PROFIL UTILISATEUR (ID: {profile['user_id']})
-{'=' * 60}
-
-BUDGET HABITUEL
-   Range : {profile['budget']['min']}€ - {profile['budget']['max']}€
-   Devise : {profile['budget']['devise']}
-
-ALIMENTATION
-   Regime : {', '.join(profile['alimentation']['regime']) if profile['alimentation']['regime'] else 'Aucun'}
-   Allergies : {', '.join(profile['alimentation']['allergies']) if profile['alimentation']['allergies'] else 'Aucune'}
-   Cuisines preferees : {', '.join(profile['alimentation']['cuisines_preferees']) if profile['alimentation']['cuisines_preferees'] else 'Non specifie'}
-
-PREFERENCES HOTELS
-   Categories : {', '.join(profile['hotels']['categories_preferees']) if profile['hotels']['categories_preferees'] else 'Non specifie'}
-   Etoiles : {profile['hotels']['etoiles_min']} - {profile['hotels']['etoiles_max']}
-   Localisation : {'Centre-ville' if profile['hotels']['localisation']['centre_ville'] else 'Excentre'}, {'Calme' if profile['hotels']['localisation']['calme'] else 'Anime'}
-   
-   EQUIPEMENTS ESSENTIELS (BLOQUANTS) :
-   {chr(10).join(f'   - {equip}' for equip in profile['hotels']['equipements_essentiels'])}
-   
-   Equipements souhaites (bonus) :
-   {chr(10).join(f'   - {equip}' for equip in profile['hotels']['equipements_souhaites'])}
-   
-   Annulation gratuite requise : {'Oui' if profile['hotels']['annulation_gratuite'] else 'Non'}
-
-CENTRES D'INTERET
-   {', '.join(profile['interets']) if profile['interets'] else 'Non specifie'}
-
-PREFERENCES DESTINATIONS
-   Climats preferes : {', '.join(profile['preferences_destination']['climats_preferes']) if profile['preferences_destination']['climats_preferes'] else 'Non specifie'}
-   Types : {', '.join(profile['preferences_destination']['types_destinations']) if profile['preferences_destination']['types_destinations'] else 'Non specifie'}
-
-DESTINATIONS FAVORITES ({len(profile['destinations']['favorites'])})
-"""
+    clean_profile = {}
     
-    if profile['destinations']['favorites']:
-        for fav in profile['destinations']['favorites']:
-            status = "Visite" if fav['deja_visite'] else "Wishlist"
-            ville = f", {fav['ville']}" if fav['ville'] else ""
-            text += f"   - {fav['pays']}{ville} ({fav['note']}/5) {status}\n"
+    if profile.get('prenom'):
+        clean_profile['prenom'] = profile['prenom']
+    if profile.get('nom'):
+        clean_profile['nom'] = profile['nom']
+    if profile.get('nationalite'):
+        clean_profile['nationalite'] = profile['nationalite']
     
-    if profile['destinations']['blacklist']:
-        text += f"\nDESTINATIONS A EVITER ({len(profile['destinations']['blacklist'])})\n"
-        for bl in profile['destinations']['blacklist']:
-            ville = f", {bl['ville']}" if bl['ville'] else ""
-            text += f"   - {bl['pays']}{ville} - {bl['raison']}\n"
+    if profile.get('budget_min') or profile.get('budget_max'):
+        budget_info = {}
+        if profile.get('budget_min'):
+            budget_info['min_par_jour'] = profile['budget_min']
+        if profile.get('budget_max'):
+            budget_info['max_par_jour'] = profile['budget_max']
+        budget_info['devise'] = profile.get('devise_preferee', 'EUR')
+        clean_profile['budget'] = budget_info
     
-    text += "\n" + "=" * 60
-    text += """
-
-REGLES POUR L'AGENT :
-1. Les EQUIPEMENTS ESSENTIELS sont BLOQUANTS - Ne JAMAIS suggerer un hotel qui n'a pas ces equipements
-2. Respecter le regime alimentaire pour TOUS les restaurants
-3. Adapter les suggestions aux centres d'interet
-4. Ne JAMAIS suggerer les destinations en blacklist
-5. Privilegier les destinations favorites ou similaires
-"""
+    if profile.get('types_voyage_preferes'):
+        clean_profile['types_voyage'] = profile['types_voyage_preferes']
     
-    return text
-
-
-if __name__ == "__main__":
-    profile = get_user_profile(user_id=1)
-    print(format_profile_for_agent(profile))
+    if profile.get('rythme_prefere'):
+        clean_profile['rythme'] = profile['rythme_prefere']
+    
+    if profile.get('centres_interet'):
+        clean_profile['centres_interet'] = profile['centres_interet']
+    
+    if profile.get('destinations_favorites'):
+        clean_profile['destinations_favorites'] = [
+            {
+                'pays': f['pays'],
+                'ville': f.get('ville'),
+                'raison': f.get('raison'),
+                'note': f.get('note')
+            }
+            for f in profile['destinations_favorites']
+        ]
+    
+    if profile.get('destinations_blacklist'):
+        clean_profile['destinations_a_eviter'] = [
+            {
+                'pays': b['pays'],
+                'raison': b.get('raison')
+            }
+            for b in profile['destinations_blacklist']
+        ]
+    
+    if profile.get('regime_alimentaire'):
+        regime = profile['regime_alimentaire']
+        clean_profile['regime_alimentaire'] = regime if isinstance(regime, list) else [regime]
+    
+    if profile.get('allergies_alimentaires'):
+        clean_profile['allergies'] = profile['allergies_alimentaires']
+    
+    if profile.get('cuisines_preferees'):
+        clean_profile['cuisines_preferees'] = profile['cuisines_preferees']
+    
+    hebergement = {}
+    
+    if profile.get('etoiles_min_preferees'):
+        hebergement['etoiles_min'] = profile['etoiles_min_preferees']
+    if profile.get('etoiles_max_preferees'):
+        hebergement['etoiles_max'] = profile['etoiles_max_preferees']
+    
+    if profile.get('categories_hotel_preferees'):
+        hebergement['categories'] = profile['categories_hotel_preferees']
+    
+    if profile.get('equipements_essentiels'):
+        hebergement['equipements_essentiels'] = profile['equipements_essentiels']
+    
+    if hebergement:
+        clean_profile['hebergement'] = hebergement
+    
+    if profile.get('modes_transport_preferes'):
+        clean_profile['transports'] = profile['modes_transport_preferes']
+    
+    if profile.get('contraintes_mobilite'):
+        clean_profile['contraintes_mobilite'] = profile['contraintes_mobilite']
+    
+    return json.dumps(clean_profile, ensure_ascii=False, indent=2)
