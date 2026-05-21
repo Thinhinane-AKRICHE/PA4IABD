@@ -1,8 +1,7 @@
 -- ============================================
--- TRAVEL BUDDY - Base de données 
+-- TRAVEL BUDDY - Base de données SIMPLIFIÉE
 -- ============================================
--- 1. PROFIL USER (stable) → guide l'IA pour suggérer
--- 2. VOYAGES (ponctuels) → contexte temporaire
+-- Focus sur l'essentiel pour personnalisation IA
 -- ============================================
 
 
@@ -12,10 +11,9 @@ CREATE TABLE IF NOT EXISTS users (
     nom VARCHAR(255) NOT NULL,
     prenom VARCHAR(255),
     email VARCHAR(255) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,  -- Hash du mot de passe (bcrypt/argon2)
+    password_hash VARCHAR(255) NOT NULL,
     telephone VARCHAR(50),
     date_naissance DATE,
-    nationalite VARCHAR(100),
     langue_preferee VARCHAR(10) DEFAULT 'fr',
     
     created_at TIMESTAMP DEFAULT NOW(),
@@ -23,42 +21,37 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 
--- Profil de voyage PERMANENT de l'utilisateur
+-- Profil de voyage SIMPLIFIÉ - uniquement l'essentiel
 CREATE TABLE IF NOT EXISTS user_travel_profile (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL UNIQUE,
-    budget_min_habituel INTEGER,
-    budget_max_habituel INTEGER,
+    
+    -- Budget (essentiel pour suggestions)
+    budget_quotidien_moyen INTEGER,  -- Budget par jour en devise locale
     devise_preferee VARCHAR(3) DEFAULT 'EUR',
-    types_voyage_preferes TEXT[],
-    rythme_prefere VARCHAR(50),    
-    duree_voyage_typique INTEGER, 
-    periodes_preferees TEXT[],
-    regime_alimentaire TEXT[],    
-    allergies_alimentaires TEXT[],    
-    cuisines_preferees TEXT[],
-    categories_hotel_preferees TEXT[],
+    
+    -- Style de voyage (guide les suggestions)
+    style_voyage VARCHAR(50),  -- 'luxe', 'confort', 'routard', 'equilibre'
+    rythme_prefere VARCHAR(50), -- 'relax', 'modéré', 'intense'
+    
+    -- Préférences alimentaires (crucial pour restaurants)
+    regime_alimentaire TEXT[],  -- ['végétarien', 'vegan', 'sans_gluten', etc.]
+    cuisines_preferees TEXT[],  -- ['italienne', 'japonaise', 'locale', etc.]
+    
+    -- Hébergement (filtres principaux)
     etoiles_min_preferees INTEGER CHECK (etoiles_min_preferees BETWEEN 1 AND 5),
-    etoiles_max_preferees INTEGER CHECK (etoiles_max_preferees BETWEEN 1 AND 5),
     prefere_centre_ville BOOLEAN DEFAULT TRUE,
-    prefere_calme BOOLEAN DEFAULT FALSE,
-    prefere_proche_transport BOOLEAN DEFAULT TRUE,
-    types_logement_acceptes TEXT[],    
-    equipements_essentiels TEXT[],
-    equipements_souhaites TEXT[],
-    exige_annulation_gratuite BOOLEAN DEFAULT TRUE,
-    accepte_paiement_sur_place BOOLEAN DEFAULT TRUE,
-    modes_transport_preferes TEXT[],    
-    classe_vol_preferee VARCHAR(50),    
-    accepte_escales BOOLEAN DEFAULT TRUE,
-    voyage_generalement_avec TEXT[],    
+    
+    -- Transport
+    modes_transport_preferes TEXT[], -- ['avion', 'train', 'bus', 'voiture']
+    
+    -- Intérêts (pour activités)
+    centres_interet TEXT[], -- ['culture', 'nature', 'gastronomie', 'shopping', 'sport', etc.]
+    
+    -- Contexte voyage
+    voyage_generalement_avec VARCHAR(50), -- 'solo', 'couple', 'famille', 'amis'
     nombre_enfants INTEGER DEFAULT 0,
-    ages_enfants INTEGER[],
-    contraintes_mobilite TEXT[],    
-    climats_preferes TEXT[],    
-    types_destinations_preferees TEXT[],    
-    centres_interet TEXT[],
-    problemes_sante TEXT[],    
+    
     updated_at TIMESTAMP DEFAULT NOW(),
 
     CONSTRAINT fk_travel_profile_user 
@@ -66,31 +59,36 @@ CREATE TABLE IF NOT EXISTS user_travel_profile (
 );
 
 
+-- Destinations favorites (apprend des goûts)
 CREATE TABLE IF NOT EXISTS user_favorite_destinations (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL,
     pays VARCHAR(255) NOT NULL,
     ville VARCHAR(255),
-    raison TEXT, 
     note INTEGER CHECK (note BETWEEN 1 AND 5),
     deja_visite BOOLEAN DEFAULT FALSE,
-    aimerait_revisiter BOOLEAN DEFAULT FALSE,
     added_at TIMESTAMP DEFAULT NOW(),
+    
     CONSTRAINT fk_favorite_destinations_user 
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+
+-- Destinations à éviter
 CREATE TABLE IF NOT EXISTS user_blacklist_destinations (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL,
     pays VARCHAR(255) NOT NULL,
     ville VARCHAR(255),
-    raison TEXT, 
+    raison TEXT,
     added_at TIMESTAMP DEFAULT NOW(),
+    
     CONSTRAINT fk_blacklist_destinations_user 
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+
+-- Voyages planifiés
 CREATE TABLE IF NOT EXISTS trips (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL,
@@ -101,22 +99,22 @@ CREATE TABLE IF NOT EXISTS trips (
     date_fin DATE,
     duree_jours INTEGER,
     budget_total INTEGER,
-    budget_deja_depense INTEGER DEFAULT 0,
-    objectif_voyage TEXT,    
-    contraintes_speciales TEXT[],
-    statut VARCHAR(50) DEFAULT 'planification',
+    statut VARCHAR(50) DEFAULT 'planification', -- 'planification', 'confirmé', 'en_cours', 'terminé'
     itineraire_detaille JSONB,
     notes_voyage TEXT,
+    
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
+    
     CONSTRAINT fk_trips_user 
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+
+-- Hôtels sauvegardés par voyage
 CREATE TABLE IF NOT EXISTS trip_hotels (
     id SERIAL PRIMARY KEY,
     trip_id INTEGER NOT NULL,
-    hotel_api_id VARCHAR(255),
     nom_hotel VARCHAR(255) NOT NULL,
     adresse TEXT,
     ville VARCHAR(255),
@@ -129,10 +127,9 @@ CREATE TABLE IF NOT EXISTS trip_hotels (
     date_checkin DATE,
     date_checkout DATE,
     nombre_nuits INTEGER,
-    hotel_data JSONB,
-    statut VARCHAR(50) DEFAULT 'wishlist',    
+    hotel_data JSONB, -- Données complètes de l'API
+    statut VARCHAR(50) DEFAULT 'wishlist', -- 'wishlist', 'réservé', 'confirmé'
     score_match_profil INTEGER CHECK (score_match_profil BETWEEN 0 AND 100),
-    raisons_match TEXT[],    
     notes_personnelles TEXT,
     saved_at TIMESTAMP DEFAULT NOW(),
     
@@ -140,6 +137,8 @@ CREATE TABLE IF NOT EXISTS trip_hotels (
         FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
 );
 
+
+-- Restaurants sauvegardés
 CREATE TABLE IF NOT EXISTS trip_restaurants (
     id SERIAL PRIMARY KEY,
     trip_id INTEGER NOT NULL,
@@ -149,114 +148,108 @@ CREATE TABLE IF NOT EXISTS trip_restaurants (
     latitude DECIMAL(9, 6),
     longitude DECIMAL(9, 6),
     types_cuisine TEXT[],
-    prix_moyen VARCHAR(20),
+    prix_moyen VARCHAR(20), -- '€', '€€', '€€€', '€€€€'
     note_moyenne DECIMAL(3, 2),
-    source_note VARCHAR(50),
     options_vegetariennes BOOLEAN,
     options_vegan BOOLEAN,
     options_sans_gluten BOOLEAN,
-    reservation_requise BOOLEAN,
     score_match_profil INTEGER CHECK (score_match_profil BETWEEN 0 AND 100),
-    raisons_match TEXT[],
     notes_personnelles TEXT,
     saved_at TIMESTAMP DEFAULT NOW(),
+    
     CONSTRAINT fk_trip_restaurants_trip 
         FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
 );
 
+
+-- Activités sauvegardées
 CREATE TABLE IF NOT EXISTS trip_activities (
     id SERIAL PRIMARY KEY,
     trip_id INTEGER NOT NULL,
     nom_activite VARCHAR(255) NOT NULL,
-    type_activite VARCHAR(100),
+    type_activite VARCHAR(100), -- 'musée', 'monument', 'parc', 'excursion', etc.
     adresse TEXT,
     ville VARCHAR(255),
     latitude DECIMAL(9, 6),
     longitude DECIMAL(9, 6),
-    duree_estimee INTEGER,
+    duree_estimee INTEGER, -- en minutes
     prix DECIMAL(10, 2),
-    horaires_ouverture JSONB,
     score_match_profil INTEGER CHECK (score_match_profil BETWEEN 0 AND 100),
-    raisons_match TEXT[],
     notes_personnelles TEXT,
     saved_at TIMESTAMP DEFAULT NOW(),
+    
     CONSTRAINT fk_trip_activities_trip 
         FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE
 );
 
+
+-- Historique de recherche (amélioration continue)
 CREATE TABLE IF NOT EXISTS search_history (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL,
-    trip_id INTEGER, 
+    trip_id INTEGER,
     query TEXT NOT NULL,
-    query_type VARCHAR(50),    
     destination VARCHAR(255),
     results_summary JSONB,
-    tools_called TEXT[],
-    user_clicked_results JSONB,    
-    user_rating INTEGER CHECK (user_rating BETWEEN 1 AND 5),
+    user_rating INTEGER CHECK (user_rating BETWEEN 1 AND 5), -- Feedback utilisateur
     searched_at TIMESTAMP DEFAULT NOW(),
+    
     CONSTRAINT fk_search_history_user 
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     CONSTRAINT fk_search_history_trip 
         FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE SET NULL
 );
 
+
+-- Cache météo
 CREATE TABLE IF NOT EXISTS weather_cache (
     id SERIAL PRIMARY KEY,
     ville VARCHAR(255) NOT NULL,
     pays VARCHAR(255),
-    latitude DECIMAL(9, 6),
-    longitude DECIMAL(9, 6),
     date_prevision DATE NOT NULL,
     temperature_min DECIMAL(5, 2),
     temperature_max DECIMAL(5, 2),
-    precipitation_mm DECIMAL(5, 2),
     conditions VARCHAR(100),
     fetched_at TIMESTAMP DEFAULT NOW(),
+    
     UNIQUE(ville, pays, date_prevision)
 );
 
+
+-- Informations pays (cache)
 CREATE TABLE IF NOT EXISTS countries_info (
     id SERIAL PRIMARY KEY,
     code_pays VARCHAR(3) UNIQUE NOT NULL,
     nom_pays VARCHAR(255) NOT NULL,
     capitale VARCHAR(255),
-    region VARCHAR(100),
-    population BIGINT,
     langues TEXT[],
-    devises JSONB,
-    country_data JSONB,
+    devise_code VARCHAR(3),
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
+
+-- Documents RAG (base de connaissances)
 CREATE TABLE IF NOT EXISTS rag_documents (
     id SERIAL PRIMARY KEY,
-    
-    source_type VARCHAR(50),
-    source_url TEXT,
-    
+    source_type VARCHAR(50), -- 'guide', 'blog', 'officiel', etc.
     destination VARCHAR(255),
     pays VARCHAR(255),
-    categorie VARCHAR(100),
-    
+    categorie VARCHAR(100), -- 'hotels', 'restaurants', 'activites', 'conseils'
     contenu_texte TEXT NOT NULL,
-
     langue VARCHAR(10) DEFAULT 'fr',
-    fiabilite INTEGER CHECK (fiabilite BETWEEN 1 AND 5),
     
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
+
+-- Chunks RAG pour embeddings
 CREATE TABLE IF NOT EXISTS rag_chunks (
     id SERIAL PRIMARY KEY,
     document_id INTEGER NOT NULL,
-    
     chunk_text TEXT NOT NULL,
     chunk_index INTEGER,
-    
-    embedding_id VARCHAR(255),
+    embedding_id VARCHAR(255), -- ID dans la base vectorielle
     metadata JSONB,
     
     created_at TIMESTAMP DEFAULT NOW(),
@@ -265,8 +258,9 @@ CREATE TABLE IF NOT EXISTS rag_chunks (
         FOREIGN KEY (document_id) REFERENCES rag_documents(id) ON DELETE CASCADE
 );
 
+
 -- ============================================
--- INDEX
+-- INDEX OPTIMISÉS
 -- ============================================
 
 -- Users & Profile
@@ -280,20 +274,16 @@ CREATE INDEX idx_trips_statut ON trips(statut);
 
 -- Trip items
 CREATE INDEX idx_trip_hotels_trip ON trip_hotels(trip_id);
-CREATE INDEX idx_trip_hotels_ville ON trip_hotels(ville, pays);
 CREATE INDEX idx_trip_restaurants_trip ON trip_restaurants(trip_id);
 CREATE INDEX idx_trip_activities_trip ON trip_activities(trip_id);
 
--- Search history
+-- Search & Cache
 CREATE INDEX idx_search_user_date ON search_history(user_id, searched_at DESC);
-CREATE INDEX idx_search_trip ON search_history(trip_id);
-
--- Cache
 CREATE INDEX idx_weather_location ON weather_cache(ville, pays, date_prevision);
 CREATE INDEX idx_countries_code ON countries_info(code_pays);
 
 -- RAG
-CREATE INDEX idx_rag_docs_destination ON rag_documents(destination);
+CREATE INDEX idx_rag_docs_destination ON rag_documents(destination, categorie);
 CREATE INDEX idx_rag_chunks_document ON rag_chunks(document_id);
 
 -- Favorites
@@ -305,77 +295,46 @@ CREATE INDEX idx_blacklist_user ON user_blacklist_destinations(user_id);
 -- DONNÉES DE TEST
 -- ============================================
 
--- Utilisateur 1 : Marie Dupont (voyageuse régulière, budget moyen-haut)
--- Mot de passe : "password123" (hash bcrypt)
-INSERT INTO users (id, nom, prenom, email, password_hash, telephone, date_naissance, nationalite, langue_preferee) VALUES
-(1, 'Dupont', 'Marie', 'marie.dupont@example.com', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYqYNZ0zJ5C', '+33612345678', '1990-05-15', 'France', 'fr')
+-- Utilisateur 1 : Marie Dupont (voyageuse confort, culture & gastronomie)
+INSERT INTO users (id, nom, prenom, email, password_hash, date_naissance, langue_preferee) VALUES
+(1, 'Dupont', 'Marie', 'marie.dupont@example.com', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYqYNZ0zJ5C', '1990-05-15', 'fr')
 ON CONFLICT (email) DO NOTHING;
 
 INSERT INTO user_travel_profile (
     user_id, 
-    budget_min_habituel, 
-    budget_max_habituel,
+    budget_quotidien_moyen,
     devise_preferee,
-    types_voyage_preferes,
+    style_voyage,
     rythme_prefere,
-    duree_voyage_typique,
-    periodes_preferees,
     regime_alimentaire,
     cuisines_preferees,
-    categories_hotel_preferees,
     etoiles_min_preferees,
-    etoiles_max_preferees,
     prefere_centre_ville,
-    prefere_calme,
-    prefere_proche_transport,
-    types_logement_acceptes,
-    equipements_essentiels,
-    equipements_souhaites,
-    exige_annulation_gratuite,
     modes_transport_preferes,
-    classe_vol_preferee,
-    accepte_escales,
+    centres_interet,
     voyage_generalement_avec,
-    nombre_enfants,
-    climats_preferes,
-    types_destinations_preferees,
-    centres_interet
+    nombre_enfants
 ) VALUES (
     1,
-    80,
-    200,
+    150, -- 150€/jour
     'EUR',
-    ARRAY['culturel', 'gastronomique', 'city-break'],
+    'confort',
     'modéré',
-    5,
-    ARRAY['printemps', 'automne'],
     ARRAY['végétarien'],
     ARRAY['française', 'italienne', 'japonaise'],
-    ARRAY['boutique', 'charme'],
-    3,
-    5,
-    TRUE,
-    FALSE,
-    TRUE,
-    ARRAY['hotel', 'appartement'],
-    ARRAY['wifi', 'petit-déjeuner', 'climatisation'],
-    ARRAY['spa', 'salle_sport', 'restaurant'],
+    3, -- Minimum 3 étoiles
     TRUE,
     ARRAY['avion', 'train'],
-    'économique',
-    TRUE,
-    ARRAY['en_couple'],
-    0,
-    ARRAY['tempéré', 'méditerranéen'],
-    ARRAY['capitales_européennes', 'villes_historiques'],
-    ARRAY['musées', 'gastronomie', 'architecture', 'shopping']
+    ARRAY['culture', 'gastronomie', 'architecture', 'shopping'],
+    'couple',
+    0
 ) ON CONFLICT (user_id) DO NOTHING;
 
--- Destinations favorites de Marie
-INSERT INTO user_favorite_destinations (user_id, pays, ville, raison, note, deja_visite, aimerait_revisiter) VALUES
-(1, 'Italie', 'Rome', 'Architecture magnifique et cuisine délicieuse', 5, TRUE, TRUE),
-(1, 'Espagne', 'Barcelone', 'Culture vibrante et plages', 5, TRUE, FALSE),
-(1, 'Japon', 'Tokyo', 'Fascinant mélange tradition/modernité', 4, FALSE, FALSE)
+-- Destinations favorites
+INSERT INTO user_favorite_destinations (user_id, pays, ville, note, deja_visite) VALUES
+(1, 'Italie', 'Rome', 5, TRUE),
+(1, 'Espagne', 'Barcelone', 5, TRUE),
+(1, 'Japon', 'Tokyo', 4, FALSE)
 ON CONFLICT DO NOTHING;
 
 -- Blacklist
@@ -383,57 +342,40 @@ INSERT INTO user_blacklist_destinations (user_id, pays, raison) VALUES
 (1, 'Arabie Saoudite', 'Préférence personnelle')
 ON CONFLICT DO NOTHING;
 
--- Utilisateur 2 : Thomas Martin (backpacker, petit budget)
--- Mot de passe : "password456" (hash bcrypt)
-INSERT INTO users (id, nom, prenom, email, password_hash, telephone, date_naissance, nationalite, langue_preferee) VALUES
-(2, 'Martin', 'Thomas', 'thomas.martin@example.com', '$2b$12$eUDlKxuNaber8ss7D/StDeNLDqfqeJQRb.PSu4wXnGPi3K0nCZXQC', '+33623456789', '1995-08-22', 'France', 'fr')
+
+-- Utilisateur 2 : Thomas Martin (backpacker, aventure & nature)
+INSERT INTO users (id, nom, prenom, email, password_hash, date_naissance, langue_preferee) VALUES
+(2, 'Martin', 'Thomas', 'thomas.martin@example.com', '$2b$12$eUDlKxuNaber8ss7D/StDeNLDqfqeJQRb.PSu4wXnGPi3K0nCZXQC', '1995-08-22', 'fr')
 ON CONFLICT (email) DO NOTHING;
 
 INSERT INTO user_travel_profile (
     user_id,
-    budget_min_habituel,
-    budget_max_habituel,
+    budget_quotidien_moyen,
     devise_preferee,
-    types_voyage_preferes,
+    style_voyage,
     rythme_prefere,
-    duree_voyage_typique,
-    periodes_preferees,
     cuisines_preferees,
     etoiles_min_preferees,
-    etoiles_max_preferees,
     prefere_centre_ville,
-    types_logement_acceptes,
-    equipements_essentiels,
     modes_transport_preferes,
-    classe_vol_preferee,
-    accepte_escales,
+    centres_interet,
     voyage_generalement_avec,
-    climats_preferes,
-    types_destinations_preferees,
-    centres_interet
+    nombre_enfants
 ) VALUES (
     2,
-    20,
-    60,
+    40, -- 40€/jour
     'EUR',
-    ARRAY['aventure', 'nature', 'backpacking'],
+    'routard',
     'intense',
-    14,
-    ARRAY['été', 'hiver'],
     ARRAY['locale', 'street_food'],
     1,
-    3,
-    FALSE,
-    ARRAY['auberge_jeunesse', 'camping', 'airbnb'],
-    ARRAY['wifi'],
+    FALSE, -- Préfère hors du centre
     ARRAY['bus', 'train', 'stop'],
-    'économique',
-    TRUE,
-    ARRAY['entre_amis', 'solo'],
-    ARRAY['tropical', 'montagnard'],
-    ARRAY['pays_exotiques', 'hors_sentiers_battus'],
-    ARRAY['randonnée', 'plongée', 'photographie', 'rencontres_locales']
+    ARRAY['nature', 'aventure', 'randonnée', 'photographie'],
+    'solo',
+    0
 ) ON CONFLICT (user_id) DO NOTHING;
+
 
 -- Voyage planifié pour Marie : Week-end à Paris
 INSERT INTO trips (
@@ -445,7 +387,6 @@ INSERT INTO trips (
     date_fin,
     duree_jours,
     budget_total,
-    objectif_voyage,
     statut
 ) VALUES (
     1,
@@ -456,11 +397,11 @@ INSERT INTO trips (
     '2026-06-17',
     3,
     600,
-    'Découvrir les quartiers romantiques et la gastronomie parisienne',
     'planification'
 ) ON CONFLICT DO NOTHING;
 
--- Hotels enregistrés pour le voyage à Paris
+
+-- Hôtel sauvegardé pour Paris
 INSERT INTO trip_hotels (
     trip_id,
     nom_hotel,
@@ -475,8 +416,7 @@ INSERT INTO trip_hotels (
     date_checkout,
     nombre_nuits,
     statut,
-    score_match_profil,
-    raisons_match
+    score_match_profil
 ) VALUES (
     1,
     'Hôtel Le Marais Boutique',
@@ -491,11 +431,11 @@ INSERT INTO trip_hotels (
     '2026-06-17',
     2,
     'wishlist',
-    92,
-    ARRAY['Centre-ville', 'Quartier historique', 'Style boutique', 'Excellent rapport qualité-prix']
+    92
 ) ON CONFLICT DO NOTHING;
 
--- Restaurants sauvegardés
+
+-- Restaurant sauvegardé
 INSERT INTO trip_restaurants (
     trip_id,
     nom_restaurant,
@@ -505,8 +445,7 @@ INSERT INTO trip_restaurants (
     prix_moyen,
     note_moyenne,
     options_vegetariennes,
-    score_match_profil,
-    raisons_match
+    score_match_profil
 ) VALUES (
     1,
     'Le Comptoir du Relais',
@@ -516,9 +455,9 @@ INSERT INTO trip_restaurants (
     '€€',
     4.5,
     TRUE,
-    88,
-    ARRAY['Cuisine française authentique', 'Options végétariennes', 'Quartier Saint-Germain']
+    88
 ) ON CONFLICT DO NOTHING;
+
 
 -- Activités planifiées
 INSERT INTO trip_activities (
@@ -528,17 +467,15 @@ INSERT INTO trip_activities (
     ville,
     duree_estimee,
     prix,
-    score_match_profil,
-    raisons_match
+    score_match_profil
 ) VALUES (
     1,
     'Visite du Musée d''Orsay',
-    'culturel',
+    'musée',
     'Paris',
     180,
     16.00,
-    95,
-    ARRAY['Passion pour l''art', 'Impressionnisme', 'Architecture du bâtiment']
+    95
 ),
 (
     1,
@@ -547,68 +484,14 @@ INSERT INTO trip_activities (
     'Paris',
     120,
     0.00,
-    90,
-    ARRAY['Quartier historique', 'Boutiques', 'Cafés charmants']
+    90
 ) ON CONFLICT DO NOTHING;
 
--- Historique de recherche
-INSERT INTO search_history (
-    user_id,
-    trip_id,
-    query,
-    query_type,
-    destination,
-    tools_called
-) VALUES (
-    1,
-    1,
-    'Meilleurs restaurants végétariens à Paris',
-    'restaurant',
-    'Paris',
-    ARRAY['search_restaurants', 'filter_by_diet']
-),
-(
-    1,
-    NULL,
-    'Que faire à Lisbonne en 3 jours',
-    'itineraire',
-    'Lisbonne',
-    ARRAY['get_city_info', 'suggest_activities']
-) ON CONFLICT DO NOTHING;
 
--- Informations pays (cache)
-INSERT INTO countries_info (
-    code_pays,
-    nom_pays,
-    capitale,
-    region,
-    population,
-    langues,
-    devises
-) VALUES (
-    'FRA',
-    'France',
-    'Paris',
-    'Europe',
-    67000000,
-    ARRAY['français'],
-    '{"EUR": {"name": "Euro", "symbol": "€"}}'::jsonb
-),
-(
-    'ITA',
-    'Italie',
-    'Rome',
-    'Europe',
-    60000000,
-    ARRAY['italien'],
-    '{"EUR": {"name": "Euro", "symbol": "€"}}'::jsonb
-),
-(
-    'ESP',
-    'Espagne',
-    'Madrid',
-    'Europe',
-    47000000,
-    ARRAY['espagnol'],
-    '{"EUR": {"name": "Euro", "symbol": "€"}}'::jsonb
-) ON CONFLICT (code_pays) DO NOTHING;
+-- Informations pays
+INSERT INTO countries_info (code_pays, nom_pays, capitale, langues, devise_code) VALUES
+('FRA', 'France', 'Paris', ARRAY['français'], 'EUR'),
+('ITA', 'Italie', 'Rome', ARRAY['italien'], 'EUR'),
+('ESP', 'Espagne', 'Madrid', ARRAY['espagnol'], 'EUR'),
+('JPN', 'Japon', 'Tokyo', ARRAY['japonais'], 'JPY')
+ON CONFLICT (code_pays) DO NOTHING;
